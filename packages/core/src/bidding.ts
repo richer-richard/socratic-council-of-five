@@ -49,19 +49,23 @@ export function analyzeBidContext(
   ).length;
   const relevance = Math.min(100, 30 + mentionCount * 20 + Math.random() * 30);
 
-  // Calculate confidence based on topic keywords matching agent expertise
-  const topicLower = topic.toLowerCase();
-  const expertiseKeywords: Record<AgentId, string[]> = {
-    george: ["logic", "proof", "reasoning", "argument", "fallacy", "valid", "premise"],
-    cathy: ["ethics", "moral", "value", "right", "wrong", "justice", "fairness"],
-    grace: ["future", "technology", "trend", "innovation", "predict", "scenario"],
-    douglas: ["evidence", "proof", "claim", "skeptic", "question", "assume"],
-    kate: ["history", "historical", "past", "precedent", "example", "tradition"],
-  };
-
-  const keywords = expertiseKeywords[agentId] ?? [];
-  const keywordMatches = keywords.filter((k) => topicLower.includes(k)).length;
-  const confidence = Math.min(100, 40 + keywordMatches * 15 + Math.random() * 20);
+  // Confidence is intentionally not role-based. Instead, we use lightweight,
+  // topic-agnostic signals + a bit of randomness to keep turn-taking dynamic.
+  const seed = `${agentId}:${topic}`.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const stableJitter = (hash % 1000) / 1000; // 0..~1, stable per (agent, topic)
+  const recentHasQuestion = recentMessages.some((m) => m.content.includes("?"));
+  const confidence = Math.min(
+    100,
+    45 +
+      (recentHasQuestion ? 8 : 0) +
+      mentionCount * 12 +
+      stableJitter * 15 +
+      Math.random() * 15
+  );
 
   // Whisper bonus - can be used for user hints (not implemented yet)
   const whisperBonus = 0;

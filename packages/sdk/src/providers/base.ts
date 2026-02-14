@@ -131,7 +131,7 @@ export function formatConversationHistory(
   // Add topic context
   messages.push({
     role: "user",
-    content: `The current discussion topic is: "${currentTopic}"\n\nPlease engage with the other council members' perspectives while staying true to your role.`,
+    content: `The current discussion topic is: "${currentTopic}"\n\nPlease engage with the other council members' perspectives. Be clear, direct, and constructive.`,
   });
 
   // Add conversation history
@@ -141,6 +141,10 @@ export function formatConversationHistory(
         role: "user",
         content: msg.content,
       });
+    } else if (msg.agentId === "tool") {
+      // Tool messages are shown in the UI transcript, but they should not be
+      // included in long-running context by default.
+      continue;
     } else if (msg.agentId === agentConfig.id) {
       messages.push({
         role: "assistant",
