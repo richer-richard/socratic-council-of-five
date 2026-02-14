@@ -61,15 +61,6 @@ const AGENT_AVATARS: Record<AgentId | "system" | "user", string> = {
   user: "👤",
 };
 
-// Agent role descriptions
-const AGENT_ROLES: Record<AgentId, string> = {
-  george: "Logician",
-  cathy: "Ethicist",
-  grace: "Futurist",
-  douglas: "Skeptic",
-  kate: "Historian",
-};
-
 function parseProxyUrl(raw?: string): ProxyConfig | undefined {
   if (!raw) return undefined;
 
@@ -150,14 +141,12 @@ function showBanner(): void {
   members.forEach((m) => {
     const avatar = AGENT_AVATARS[m.id];
     const name = DEFAULT_AGENTS[m.id].name.padEnd(10);
-    const role = `(${AGENT_ROLES[m.id]})`.padEnd(12);
     const provider = m.provider.padEnd(24);
     const color = AGENT_COLORS[m.id];
     console.log(
       chalk.gray("  │  ") +
       `${avatar} ` +
       color(name) +
-      chalk.gray(role) +
       chalk.dim(provider) +
       chalk.gray("│")
     );
@@ -291,7 +280,7 @@ async function configureAgentModels(): Promise<void> {
     }));
 
     const selectedModel = await select<ModelId>({
-      message: `${AGENT_AVATARS[agentId]} ${color(DEFAULT_AGENTS[agentId].name)} ${chalk.dim(`(${AGENT_ROLES[agentId]})`)}:`,
+      message: `${AGENT_AVATARS[agentId]} ${color(DEFAULT_AGENTS[agentId].name)}:`,
       choices: modelChoices,
       default: currentModel,
     });
@@ -500,6 +489,8 @@ async function startDiscussion(): Promise<void> {
 
   // Track statistics
   let currentAgentId: AgentId | null = null;
+  let currentMessageId: string | null = null;
+  let printedForCurrentMessage = false;
   const totalTokens = { input: 0, output: 0 };
   const agentStats: Record<AgentId, { messages: number; tokens: number }> = {
     george: { messages: 0, tokens: 0 },
@@ -514,20 +505,62 @@ async function startDiscussion(): Promise<void> {
     switch (event.type) {
       case "turn_started": {
         currentAgentId = event.agentId;
+        currentMessageId = event.messageId;
+        printedForCurrentMessage = false;
         displayTurnHeader(event.agentId, event.turnNumber, maxTurns);
         process.stdout.write(chalk.gray("  │  "));
         break;
       }
 
+      case "message_replace": {
+        if (event.agentId !== currentAgentId || event.messageId !== currentMessageId) break;
+
+        // When the core retries a completion (e.g., tool iteration), it emits a
+        // replace with an empty string to clear the in-progress line.
+        if (event.content === "") {
+          if (printedForCurrentMessage) {
+            process.stdout.write("\n");
+            process.stdout.write(chalk.gray("  │  "));
+            printedForCurrentMessage = false;
+          }
+          break;
+        }
+
+        process.stdout.write("\n");
+        process.stdout.write(chalk.gray("  │  "));
+        process.stdout.write(event.content);
+        printedForCurrentMessage = true;
+        break;
+      }
+
       case "message_chunk": {
-        if (event.agentId === currentAgentId) {
+        if (event.agentId === currentAgentId && event.messageId === currentMessageId) {
           // Word wrap long lines
           process.stdout.write(event.content);
+          printedForCurrentMessage = true;
         }
         break;
       }
 
       case "message_complete": {
+        if (event.message.agentId === "tool") {
+          console.log();
+          console.log(chalk.gray("  │  ") + chalk.dim(event.message.content));
+          console.log();
+          break;
+        }
+
+        // If a provider didn't stream any chunks, fall back to the completed content.
+        if (
+          currentAgentId &&
+          currentMessageId &&
+          event.message.agentId === currentAgentId &&
+          event.message.id === currentMessageId &&
+          !printedForCurrentMessage
+        ) {
+          process.stdout.write(event.message.content);
+        }
+
         console.log(); // New line after message
         const tokens = event.message.tokens;
         if (tokens) {
@@ -545,7 +578,7 @@ async function startDiscussion(): Promise<void> {
       }
 
       case "bidding_complete": {
-        displayBiddingScores(event.scores, event.winner);
+        displayBiddingScores(event.round.scores, event.round.winner);
         break;
       }
 
